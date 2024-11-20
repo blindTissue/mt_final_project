@@ -1,17 +1,19 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import pickle
-from encoder_decoder import VectorEncoderDecoder
+from src.encoder_decoder import VectorEncoderDecoder
 from torch import nn
 import torch
 
-llama_1b = AutoModelForCausalLM.from_pretrained("models/meta-llama/llama-3.2-1B")
-llama_3b = AutoModelForCausalLM.from_pretrained("models/meta-llama/llama-3.2-3B")
+
+device = 'mps' # change to whatever device you are using
+llama_1b = AutoModelForCausalLM.from_pretrained("models/meta-llama/llama-3.2-1B").to(device)
+llama_3b = AutoModelForCausalLM.from_pretrained("models/meta-llama/llama-3.2-3B").to(device)
 llama_1b_trunc = AutoModelForCausalLM.from_pretrained("models/meta-llama/llama-3.2-1B")
 llama_tokenizer = AutoTokenizer.from_pretrained("tokenizers/meta-llama/llama-3.2-1B")
 wikitext_chunked = pickle.load(open("data/chunked_wikitext2/train.pkl", "rb"))
-device = 'mps' # change to whatever device you are using
+
 max_len = 1000
-loss_sum = 0
+
 
 class inner_translation_model(nn.Module):
     def __init__(self, src_model, tgt_model, translation_model, tgt_layer, src_layer):
@@ -56,12 +58,13 @@ def loss_fn(intermediate_pred, intermediate_tgt, logits_pred, logits_tgt):
     return cosine_loss_out + kl_div_out
 
 ved = VectorEncoderDecoder(3072, [1024, 512], 256, 2048)
-itm = inner_translation_model(llama_3b, llama_1b_trunc, ved, 10, 18)
+itm = inner_translation_model(llama_3b, llama_1b_trunc, ved, 10, 18).to(device)
 
 
 def train_model():
     epochs = 2
     optimizer = torch.optim.Adam(itm.parameters(), lr=0.001)
+    loss_sum = 0
     for epoch in range(epochs):
         for i, text in enumerate(wikitext_chunked):
             input = llama_tokenizer(text, max_length=max_len, return_tensors="pt", truncation=True)
@@ -84,5 +87,3 @@ def train_model():
             if i % 100 == 0:
                 torch.save(itm, f"models/inner_translation_model_{epoch}_{i}.pth")
 
-if __name__ == "__main__":
-    train_model()
